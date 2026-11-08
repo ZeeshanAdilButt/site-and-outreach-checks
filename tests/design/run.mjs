@@ -79,7 +79,9 @@ for (const pagePath of paths) {
     }
     if (a.measure_ch && b.measure_ch) {
       for (const k of ["min", "max"]) {
-        if (Math.abs(a.measure_ch[k] - b.measure_ch[k]) > tol.measure_ch) {
+        // Line length in characters depends on how each system renders the font, so Windows, macOS and
+        // Linux differ by a few characters. Compare it as a share, which still catches a number that was made up.
+        if (Math.abs(a.measure_ch[k] - b.measure_ch[k]) > tol.measure_ch_relative * Math.max(a.measure_ch[k], b.measure_ch[k])) {
           problems.push(`${tag}: the ${k} line length is ${a.measure_ch[k]} characters but your file says ${b.measure_ch[k]}.`);
         }
       }

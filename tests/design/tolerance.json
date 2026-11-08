@@ -1,7 +1,7 @@
 {
   "size_px": 0.5,
   "ratio_best": 0.02,
-  "measure_ch": 2,
+  "measure_ch_relative": 0.2,
   "spacing_share": 0.05,
   "contrast_failures_count": 0,
   "accessibility_points": 3
