@@ -78,7 +78,6 @@ export const reachouts = [
   { who: "ada", channel: "linkedin", sent: "2020-01-05 08:00:00+00" },
   { who: "ben", channel: "linkedin", sent: "2020-01-02 07:00:00+00" },
   { who: "cy", channel: "whatsapp", sent: "2020-01-03 09:00:00+00" },
-  { who: "live", channel: "other", sent: "2020-01-04 09:00:00+00" },
   { who: "ben", channel: "email", sent: "2020-01-06 09:00:00+00" },
 ];
 export const clicks = [
@@ -132,9 +131,22 @@ async function hasTable(db, table) {
   return (await db.query("select to_regclass($1) as t", [`public.${table}`])).rows[0].t !== null;
 }
 
+// Removes an earlier load of this seed, so running it twice on one database does not double the rows.
+async function clean(db) {
+  const gone = async (table, where) => {
+    if (await hasTable(db, table)) await db.query(`delete from ${table} where ${where}`);
+  };
+  await gone("clicks", "at < '2021-01-01'");
+  await gone("reachouts", "note = 'dw-seed'");
+  await gone("proposal_visits", "visit_key like 'dwvisit-%'");
+  await gone("dropped", "at < '2021-01-01'");
+  await gone("views", "visitor like 'dw5eed%'");
+}
+
 export async function loadDwSeed(db) {
   const loaded = [];
   const skipped = [];
+  await clean(db);
   const ts = (d, h) => `${d} ${String(h).padStart(2, "0")}:00:00+00`;
   if (await hasTable(db, "views")) {
     await db.query("delete from views where visitor like 'dw5eed%'");
