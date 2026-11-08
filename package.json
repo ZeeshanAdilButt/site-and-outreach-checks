@@ -1,0 +1,20 @@
+{
+  "name": "site-and-outreach-checks",
+  "version": "1.0.0",
+  "private": true,
+  "description": "DW's own checks for the site-and-outreach course. Run by the reusable workflow in .github/workflows/canonical.yml.",
+  "scripts": {
+    "unit": "vitest run --config vitest.config.mts tests/unit --exclude tests/unit/panels.test.ts",
+    "panels": "vitest run --config vitest.config.mts tests/unit/panels.test.ts",
+    "e2e": "playwright test"
+  },
+  "dependencies": {
+    "pg": "8.23.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.65.0",
+    "isbot": "5.2.2",
+    "lighthouse": "13.6.0",
+    "vitest": "5.1.0"
+  }
+}
