@@ -1,0 +1,11 @@
+# DW config for the secret scan: the default rules, plus one allowance.
+# The generated seed files hold 16 hex character visitor codes next to the word linkedin, which the
+# default linkedin-client-secret rule reads as a key. They are made-up data, not secrets.
+title = "site-and-outreach checks"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "generated seed files"
+paths = ['''db/seeds/.*\.sql''']
