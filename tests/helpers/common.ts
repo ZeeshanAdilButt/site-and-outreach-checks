@@ -47,11 +47,33 @@ export function why(chapter: string, text: string): string {
   return `Chapter ${chapter}: ${text}`;
 }
 
+const TABLE_CHAPTER: Record<string, string> = {
+  views: "4.4, part 2",
+  sessions: "4.10",
+  proposals: "5.4, part 2",
+  recipients: "5.4, part 2",
+  proposal_visits: "5.6, part 1",
+  clicks: "6.3, part 1",
+  reachouts: "6.4, part 1",
+};
+
+// A database error that says a table is missing becomes a plain message that names the chapter.
+function plain(error: unknown): Error {
+  const e = error as { code?: string; message?: string };
+  const table = e.message?.match(/relation "([a-z_]+)" does not exist/)?.[1];
+  if (e.code === "42P01" && table) {
+    return new Error(`Chapter ${TABLE_CHAPTER[table] ?? "4.4"}: your database has no table "${table}". Add it to db/schema.sql and run node db/migrate.mjs.`);
+  }
+  return error instanceof Error ? error : new Error(String(error));
+}
+
 export async function withDb<T>(fn: (db: pg.Client) => Promise<T>): Promise<T> {
   const db = new pg.Client({ connectionString: process.env.DATABASE_URL });
   await db.connect();
   try {
     return await fn(db);
+  } catch (error) {
+    throw plain(error);
   } finally {
     await db.end();
   }
