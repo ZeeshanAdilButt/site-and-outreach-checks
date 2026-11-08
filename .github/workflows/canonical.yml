@@ -1,0 +1,182 @@
+# DW's canonical checks for the site-and-outreach course.
+# A learner's repository calls this file with:
+#
+#   jobs:
+#     canonical:
+#       uses: ZeeshanAdilButt/site-and-outreach-checks/.github/workflows/canonical.yml@<pinned commit>
+#       with:
+#         checks_sha: <the same pinned commit>
+#
+# It never runs the learner's npm scripts. It builds with next build, starts next start, and runs DW's own tests.
+# Each step has a plain name. A red step prints one message that names the chapter that teaches the fix.
+name: canonical
+
+on:
+  workflow_call:
+    inputs:
+      checks_sha:
+        description: The commit of site-and-outreach-checks whose tests to run. It must be the commit in "uses".
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  canonical:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
+      OWNER_SECRET: ci-owner-${{ github.run_id }}-${{ github.run_attempt }}-value
+      VISITOR_SECRET: ci-visitor-${{ github.run_id }}-${{ github.run_attempt }}-value
+      LEARNER: ${{ github.workspace }}/learner
+      BASE_URL: http://localhost:3000
+      BASE_URL_DOWN: http://localhost:3001
+      CI: "true"
+    steps:
+      - name: "1. Check out your repository with its full history"
+        id: s1
+        uses: actions/checkout@v4
+        with:
+          path: learner
+          fetch-depth: 0
+
+      - name: "2. Check out DW's tests at the pinned commit"
+        id: s2a
+        uses: actions/checkout@v4
+        with:
+          repository: ZeeshanAdilButt/site-and-outreach-checks
+          ref: ${{ inputs.checks_sha }}
+          path: checks
+
+      - name: "2. Check that your checks.yml pins the same commit twice"
+        id: s2
+        run: |
+          cd checks
+          npm ci --no-audit --no-fund
+          node scripts/verify-pin.mjs ../learner "${{ inputs.checks_sha }}"
+
+      - name: "3. Database: your schema, then DW's own seed"
+        id: s3
+        working-directory: checks
+        run: node tests/seed/load.mjs ../learner
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: "4. Install and build with next build"
+        id: s4
+        run: |
+          cd learner
+          npm ci --no-audit --no-fund
+          npx next build
+          cd ../checks
+          npx playwright install --with-deps chromium
+
+      - name: "5. Start the site on port 3000 and wait for it"
+        id: s5
+        if: ${{ !cancelled() && steps.s4.outcome == 'success' }}
+        run: |
+          cd learner
+          nohup npx next start -p 3000 > ../server-3000.log 2>&1 &
+          for i in $(seq 1 60); do
+            if curl -s -o /dev/null http://localhost:3000/; then echo "The site answered after $i seconds."; exit 0; fi
+            sleep 1
+          done
+          echo "The site did not answer on port 3000 within 60 seconds. Last lines of its log:"
+          tail -30 ../server-3000.log
+          exit 1
+
+      - name: "6. DW's unit tests on your filter, open rule, tokens, sessions and visitor hash"
+        id: s6
+        if: ${{ !cancelled() && steps.s3.outcome == 'success' }}
+        working-directory: checks
+        run: npm run unit
+
+      - name: "7. Views: a robot adds none, a real browser adds one"
+        id: s7
+        if: ${{ !cancelled() && steps.s5.outcome == 'success' }}
+        working-directory: checks
+        run: npx playwright test tests/e2e/views.spec.ts
+
+      - name: "8. Proposals: a robot stays fetched, a real browser opens and sees"
+        id: s8
+        if: ${{ !cancelled() && steps.s5.outcome == 'success' }}
+        working-directory: checks
+        run: npx playwright test tests/e2e/proposals.spec.ts
+
+      - name: "9. Redirects: 307, no-store and exactly one click"
+        id: s9
+        if: ${{ !cancelled() && steps.s5.outcome == 'success' }}
+        working-directory: checks
+        run: npx playwright test tests/e2e/redirects.spec.ts
+
+      - name: "10. Login and data routes: 401 without a real session"
+        id: s10
+        if: ${{ !cancelled() && steps.s5.outcome == 'success' }}
+        working-directory: checks
+        run: npx playwright test tests/e2e/login.spec.ts
+
+      - name: "11. Panel queries give DW's expected answers on DW's seed"
+        id: s11
+        if: ${{ !cancelled() && steps.s3.outcome == 'success' }}
+        working-directory: checks
+        run: npm run panels
+
+      - name: "12. A second copy with the database down still answers"
+        id: s12
+        if: ${{ !cancelled() && steps.s4.outcome == 'success' }}
+        run: |
+          cd learner
+          DATABASE_URL=postgres://nobody@127.0.0.1:1/none nohup npx next start -p 3001 > ../server-3001.log 2>&1 &
+          for i in $(seq 1 60); do
+            if curl -s -o /dev/null http://localhost:3001/; then echo "The second copy answered after $i seconds."; break; fi
+            if [ "$i" = "60" ]; then echo "The second copy did not start on port 3001."; tail -30 ../server-3001.log; exit 1; fi
+            sleep 1
+          done
+          cd ../checks
+          npx playwright test tests/e2e/failsoft.spec.ts
+
+      - name: "13. Design check matches your committed design-report.json"
+        id: s13
+        if: ${{ !cancelled() && steps.s5.outcome == 'success' }}
+        working-directory: checks
+        run: node tests/design/run.mjs ../learner
+
+      - name: "14. Posts: at least three commits each, drafts shown"
+        id: s14
+        if: ${{ !cancelled() && steps.s1.outcome == 'success' && steps.s2a.outcome == 'success' }}
+        working-directory: checks
+        run: node tests/commits/check-commits.mjs ../learner
+
+      - name: "15. No secret in the history"
+        id: s15
+        if: ${{ !cancelled() && steps.s1.outcome == 'success' && steps.s2a.outcome == 'success' }}
+        run: |
+          curl -sSL -o gitleaks.tgz https://github.com/gitleaks/gitleaks/releases/download/v8.28.0/gitleaks_8.28.0_linux_x64.tar.gz
+          echo "a65b5253807a68ac0cafa4414031fd740aeb55f54fb7e55f386acb52e6a840eb  gitleaks.tgz" | sha256sum -c -
+          tar -xzf gitleaks.tgz gitleaks
+          ./gitleaks git --no-banner --redact --exit-code 1 --config checks/gitleaks.toml --log-opts="--all" learner
+          node checks/tests/secrets/scan.mjs learner
+
+      - name: "Summary: canonical steps green"
+        if: ${{ always() }}
+        env:
+          STEPS_JSON: ${{ toJSON(steps) }}
+        run: |
+          tail -n 25 server-3000.log 2>/dev/null | sed 's/^/server 3000: /' || true
+          node checks/scripts/summary.mjs
